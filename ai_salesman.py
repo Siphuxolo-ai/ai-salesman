@@ -1,123 +1,108 @@
 from flask import Flask, request, jsonify, render_template_string
-from flask_cors import CORS
-import os
-import google.generativeai as genai
+import re
 
 app = Flask(__name__)
-CORS(app)
-
-# Add your Gemini key on Render later
-GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
-if GEMINI_KEY:
-    genai.configure(api_key=GEMINI_KEY)
-
-PROMPTS = {
-"solar": """
-You are Thandi, elite solar sales qualifier for SunPower EC, East London & Gqeberha.
-Goal: Qualify and book FREE site assessment. Be short, professional, friendly (English + a bit Xhosa).
-Company: SunPower EC, installs 3kW-15kW systems R45k-R180k, 5yr warranty, covers all EC.
-QUALIFYING FLOW:
-1. Ask area first (check if EC)
-2. Ask monthly Eskom bill? If below R800: "For bills under R800, solar payback is long. We have small backup from R18k - are you interested in backup or full solar?"
-3. House or business? Own or rent? (Renters don't qualify)
-4. Roof type: tile, IBR (zinc), flat?
-5. Then book: "You qualify for free assessment. Our tech can come Tue 10am or Thu 2pm, which suits?"
-Always collect Name + Number at end.
-If qualified, output at end: [HOT LEAD] summary
-""",
-"car": """
-You are Mike, car sales qualifier for EL Auto, Wilsonia East London.
-Goal: Qualify buyer and book test drive. Short, no fluff.
-Stock: 2021 Ford Ranger 2.2 XL 45k km R299k, 2020 Toyota Hilux 2.4 GD6 R345k, 2019 Polo TSI R189k.
-FLOW:
-1. Confirm car still available, give price/km
-2. Budget? Trade-in? Cash or finance?
-3. Blacklisted? License?
-4. Book test drive: "We have slot tomorrow 10am or 3pm, which works? Bring license + 3 months bank statement"
-Collect Name + Number.
-Output [HOT LEAD] summary when qualified.
-"""
-}
 
 HTML = """
 <!DOCTYPE html>
-<html><head><title>EC AutoSolar AI - Live Demo</title>
+<html>
+<head><title>SA Auto + Solar AI Closer - National</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-body{font-family:Inter,Arial;max-width:480px;margin:0 auto;background:#0a0a0a;color:white;padding:16px}
-.card{background:#1a1a1a;border-radius:16px;padding:16px;margin-bottom:12px;border:1px solid #333}
-.tabs{display:flex;gap:8px;margin-bottom:12px} .tab{flex:1;padding:12px;border-radius:10px;border:none;font-weight:bold;cursor:pointer}
-.active{background:#00ff88;color:black} .inactive{background:#2a2a2a;color:white}
-#chat{height:420px;overflow-y:auto;padding:10px;background:black;border-radius:12px}
-.user{text-align:right;margin:8px;color:#00ff88} .ai{text-align:left;margin:8px;color:white;background:#222;padding:8px;border-radius:8px}
-input{width:70%;padding:14px;border-radius:10px;border:none;background:#222;color:white} button{width:28%;padding:14px;border-radius:10px;border:none;background:#00ff88;font-weight:bold}
-.lead{background:#00ff88;color:black;padding:8px;border-radius:8px;margin-top:8px;font-size:12px}
-</style></head><body>
-<div class="card"><h2>🚀 EC AutoSolar AI</h2><p>R10k+ Client Demo - Works 24/7</p>
-<div class="tabs"><button id="tSolar" class="tab active" onclick="setType('solar')">☀️ Solar Bot</button>
-<button id="tCar" class="tab inactive" onclick="setType('car')">🚗 Car Bot</button></div>
-<p id="desc">Solar: Qualifies Eskom bill, books site visit</p></div>
-<div class="card"><div id="chat"><div class="ai">Molo! I'm Thandi/Mike. Ask me about solar or that Ranger? I'll qualify and book you now.</div></div>
-<div style="display:flex;gap:8px;margin-top:10px"><input id="msg" placeholder="Hi, saw your solar ad..." onkeypress="if(event.key==='Enter')send()">
-<button onclick="send()">Send</button></div></div>
-<div class="card"><h4>What owner gets on WhatsApp:</h4><div id="lead" class="lead">🔥 HOT LEAD will appear here after qualification</div></div>
+body{background:#0f0f0f;color:white;font-family:Arial;display:flex;justify-content:center;padding:20px}
+.box{width:100%;max-width:430px;background:#1e1e1e;border-radius:15px;padding:15px;border:1px solid #333}
+.msg{background:#2d2d2d;padding:10px;border-radius:10px;margin:8px 0;line-height:1.4}
+.you{color:#a0ff9e;text-align:right;background:#1a3a1a}
+input{width:65%;padding:12px;border-radius:8px;border:none;background:#333;color:white}
+button{background:#25D366;color:white;padding:12px 15px;border:none;border-radius:8px;font-weight:bold;cursor:pointer}
+a.wa{background:#25D366;display:block;text-align:center;padding:14px;color:white;text-decoration:none;border-radius:8px;margin-top:12px;font-weight:bold;font-size:15px}
+small{color:#888}
+.badge{background:#25D366;color:black;padding:2px 8px;border-radius:10px;font-size:10px}
+</style>
+</head>
+<body>
+<div class="box">
+<h3>🇿🇦 SA Auto & Solar AI <span class="badge">LIVE 24/7</span><br><small style="color:#25D366">We close for you - Nationwide</small></h3>
+<div id="chat">
+<div class="msg">Molo! 👋 I'm your AI Closer.<br><br>🚗 Looking for a car? Tell me: Brand, budget? (Toyota, VW, Ford, BMW, Suzuki etc)<br><br>☀️ Solar? Tell me your Eskom bill - I work for WHOLE SA!</div>
+</div>
+<div style="display:flex;gap:5px;margin-top:15px">
+<input id="inp" placeholder="Type: Ranger R500k or Solar bill R3000...">
+<button onclick="send()">Send</button>
+</div>
+<div id="lead" style="display:none">
+<a class="wa" id="walink" target="_blank">✅ CONFIRM ON WHATSAPP: 0689249795</a>
+<p style="font-size:11px;text-align:center;color:#aaa">Lead locked! We book Tue 10am / Thu 2pm - National delivery</p>
+</div>
+</div>
 <script>
-let type='solar';
-function setType(t){type=t;
- document.getElementById('tSolar').className=t=='solar'?'tab active':'tab inactive';
- document.getElementById('tCar').className=t=='car'?'tab active':'tab inactive';
- document.getElementById('desc').innerText=t=='solar'?'Solar: Qualifies Eskom bill, books site visit':'Car: Qualifies budget & books test drive';
- document.getElementById('chat').innerHTML='<div class=ai>Switched to '+(t=='solar'?'Solar Thandi':'Auto Mike')+'. How can I help?</div>';
+let step=0; let context=""; let bill="2500";
+function add(t,c){let d=document.createElement('div');d.className='msg '+c;d.innerText=t;document.getElementById('chat').appendChild(d);window.scrollTo(0,document.body.scrollHeight)}
+function send(){
+ let v=document.getElementById('inp').value; if(!v)return;
+ add("You: "+v,"you"); document.getElementById('inp').value="";
+ fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:v,step:step,context:context,bill:bill})})
+ .then(r=>r.json()).then(data=>{add(data.reply,""); step=data.next_step; context=data.context; bill=data.bill;
+ if(data.show_wa){document.getElementById('lead').style.display='block';
+ document.getElementById('walink').href="https://wa.me/27689249795?text=NEW%20LEAD:%20"+encodeURIComponent(data.wa_text); }});
 }
-async function send(){
- let m=document.getElementById('msg').value; if(!m) return;
- let c=document.getElementById('chat'); c.innerHTML+=`<div class=user>You: ${m}</div>`; document.getElementById('msg').value='';
- let r=await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:m,type:type})});
- let d=await r.json(); c.innerHTML+=`<div class=ai>${d.reply}</div>`;
- if(d.lead) document.getElementById('lead').innerText=d.lead; c.scrollTop=c.scrollHeight;
-}
-</script></body></html>
+</script>
+</body>
+</html>
 """
+
+# ALL SA CAR BRANDS DATABASE
+CARS_DB = {
+ "ranger": "Ford Ranger from R350k - 4x2, 4x4, Wildtrak, Raptor available. What budget?",
+ "hilux": "Toyota Hilux from R380k - Legendary, low fuel, best resale! Budget?",
+ "corolla": "Corolla Cross / Corolla from R300k - Hybrid available!",
+ "polo": "VW Polo from R250k, Polo Vivo from R180k - Most popular in SA!",
+ "swift": "Suzuki Swift from R200k - Best budget car, low fuel!",
+ "bmw": "BMW 1,2,3 Series from R400k - We have finance for blacklisted too (with deposit)",
+ "toyota": "Toyota - Hilux, Corolla, Fortuner, Starlet - Which model you want? Budget?",
+ "ford": "Ford - Ranger, Everest, EcoSport - Which one?",
+ "vw": "VW - Polo, Golf, T-Cross, Amarok - Which model?",
+ "suzuki": "Suzuki - Swift, Baleno, Jimny, Ertiga - Budget?",
+}
 
 @app.route("/")
 def home(): return render_template_string(HTML)
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    data = request.json
-    msg = data.get("message","")
-    bot_type = data.get("type","solar")
-    prompt = PROMPTS.get(bot_type, PROMPTS["solar"])
+    d = request.json
+    msg = d.get("message","").lower()
+    step = d.get("step",0)
+    ctx = d.get("context","")
+    bill = d.get("bill","2500")
     
-    if not GEMINI_KEY:
-        # Demo fallback without key - still shows it works
-        if bot_type=="solar":
-            reply = "Enkosi! What's your area in EC and monthly Eskom bill? (e.g. Mdantsane, R2500). I'll check if you qualify for free assessment."
-            if "R" in msg and any(x in msg for x in ["2000","2500","3000","1500"]):
-                reply = "Perfect, you qualify! Own house or renting? And roof type - tile or zinc? I can book Tue 10am or Thu 2pm for free assessment."
-                lead = f"🔥 HOT SOLAR LEAD: Bill {msg}, Area EC, Wants site visit"
-                return jsonify({"reply": reply, "lead": lead})
+    # SOLAR DETECTION - NATIONWIDE
+    if any(x in msg for x in ["bill", "eskom", "solar", "loadshedding", "inverter", "r2", "r3", "r4", "r1"]) or re.search(r'\b[1-9]\d{3}\b', msg):
+        m=re.search(r'(\d{3,5})',msg)
+        if m: bill=m.group(1)
+        if int(bill) >= 800:
+            return jsonify(reply=f"Sharp! R{bill} bill qualifies for solar ANYWHERE in SA! 🇿🇦\n\nWe install in JHB, CPT, DBN, EL, PE - all provinces.\n\nOwn house or renting? And city? I book free assessment Tue 10am / Thu 2pm.", next_step=10, context="solar", bill=bill, wa_text=f"Solar Lead - Bill R{bill} - {msg}")
         else:
-            reply = "Yes Ranger still available! R299k, 45k km. What's your budget and do you have trade-in? Cash or finance?"
-            if "finance" in msg.lower() or "budget" in msg.lower():
-                reply = "Sharp. Are you blacklisted? License valid? I can book test drive tomorrow 10am Wilsonia - what is your name?"
-                lead = "🔥 HOT CAR LEAD: Ranger interest, needs finance, test drive"
-                return jsonify({"reply": reply, "lead": lead})
-        return jsonify({"reply": reply, "lead": ""})
+            return jsonify(reply=f"R{bill} is low for full solar, but we have backup kit from R18k (runs fridge, TV, WiFi) - Nationwide install. City?", next_step=10, context="solar", bill=bill, wa_text=f"Small Solar Lead - R{bill}")
 
-    try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(f"{prompt}\n\nCustomer says: {msg}\n\nReply short:")
-        text = response.text
-        lead = ""
-        if "[HOT LEAD]" in text or "HOT LEAD" in text:
-            lead = text.split("[HOT LEAD]")[-1][:200]
-        return jsonify({"reply": text, "lead": lead or "Qualified lead captured - check chat"})
-    except Exception as e:
-        return jsonify({"reply": "I'm here 24/7! Tell me your area and Eskom bill (solar) or which car you want (car). I'll book you now.", "lead": ""})
+    # CAR DETECTION - ALL BRANDS
+    if any(x in msg for x in ["car", "bakkie", "ranger", "hilux", "polo", "budget", "finance", "suzuki", "toyota", "bmw", "vw", "ford", "buy"]) or step==20:
+        for brand, reply in CARS_DB.items():
+            if brand in msg:
+                return jsonify(reply=reply+" Finance available - deposit? And city? We deliver nationwide!", next_step=20, context="car", bill=bill, wa_text=f"Car Lead - {brand.upper()} - {msg}")
+        return jsonify(reply="We sell ALL cars in SA! 🚗\nToyota, VW, Ford, Suzuki, BMW, Nissan, Hyundai etc\n\nTell me brand + budget? Eg: Polo R200k or Ranger R500k. We finance + deliver nationwide!", next_step=20, context="car", bill=bill, wa_text=f"Car Lead General - {msg}")
 
-@app.route("/health")
-def health(): return "OK - Bot running 24/7"
+    if step==10: # solar followup
+        return jsonify(reply=f"Perfect! Name + WhatsApp to confirm? We cover your area {msg} - Our team comes with assessment. Eg: Mike 0689249795", next_step=11, context="solar", bill=bill, wa_text=f"Solar Lead - City {msg} - Bill R{bill}")
+    if step==11:
+        return jsonify(reply=f"✅ BOOKED! Address for team? National install team will come Tue 10am. Click WhatsApp below to confirm now!", next_step=12, context="solar", bill=bill, show_wa=True, wa_text=f"SOLAR BOOKED - Bill R{bill} - Details: {msg} - Call NOW 0689249795", slot="Tue 10am")
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
+    if step==20: # car followup
+        return jsonify(reply="Nice! What's your name + WhatsApp? I lock that car for you. Eg: Mike 0689249795 - City?", next_step=21, context="car", bill=bill, wa_text=f"Car Lead - Details {msg}")
+    if step==21:
+        return jsonify(reply="✅ LEAD LOCKED! What city for delivery? We do finance check now. Click WhatsApp below!", next_step=22, context="car", bill=bill, show_wa=True, wa_text=f"CAR BOOKED - {msg} - CALL NOW 0689249795", slot="Tue 10am")
+
+    return jsonify(reply="I handle 2 things for WHOLE SA: 🚗 ALL cars (Toyota, VW, Ford, Suzuki, BMW) and ☀️ Solar for any bill! What you need?", next_step=0, context="", bill=bill)
+
+if __name__=="__main__":
+    app.run(host="0.0.0.0", port=10000)
